@@ -15,6 +15,7 @@ geodist(
   samplesize = 2000,
   sampling = "regular",
   variables = NULL,
+  weight = NULL,
   timevar = NULL,
   time_unit = "auto",
   algorithm = "brute"
@@ -42,6 +43,8 @@ locations within the modeldomain rather than the whole area.}
 \item{sampling}{character. How to draw prediction samples? See \link[sp]{spsample}. Use sampling = "Fibonacci" for global applications.}
 
 \item{variables}{character vector defining the predictor variables used if type="feature. If not provided all variables included in modeldomain are used.}
+
+\item{weight}{A data.frame containing weights for each variable, used if type="feature". Optional.}
 
 \item{timevar}{optional. character. Column that indicates the date. Only used if type="time".}
 

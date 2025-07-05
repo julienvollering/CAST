@@ -1,0 +1,141 @@
+---
+title: "geodist and knndm in feature space with weights"
+author: "Julien VOllering"
+date: "`r Sys.Date()`"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+vignette: >
+  %\VignetteIndexEntry{Feature space with weights}
+  %\VignetteEncoding{UTF-8}
+  %\VignetteEngine{knitr::rmarkdown}
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(fig.width = 8.83)
+```
+
+```{r, message = FALSE, warning=FALSE}
+#install.packages("CAST")
+library(CAST)
+```
+
+# `geodist`
+
+Below is adapted from `geodist` examples
+
+```{r}
+library(sf)
+library(terra)
+library(caret)
+library(rnaturalearth)
+library(ggplot2)
+data(splotdata)
+studyArea <- rnaturalearth::ne_countries(continent = "South America", returnclass = "sf")
+
+########### Distance between training data and new data:
+dist <- geodist(splotdata, studyArea)
+# With density functions
+plot(dist)
+# Or ECDFs (relevant for nndm and knnmd methods)
+plot(dist, stat="ecdf")
+
+########### Distance between training data, new data and test data (here Chile):
+plot(splotdata[,"Country"])
+dist <- geodist(splotdata[splotdata$Country != "Chile",], studyArea,
+                testdata = splotdata[splotdata$Country == "Chile",])
+plot(dist)
+
+########### Distance between training data, new data and CV folds:
+folds <- createFolds(1:nrow(splotdata), k=3, returnTrain=FALSE)
+dist <- geodist(x=splotdata, modeldomain=studyArea, cvfolds=folds)
+# Using density functions
+plot(dist)
+# Using ECDFs (relevant for nndm and knnmd methods)
+plot(dist, stat="ecdf")
+
+########### Distances in the feature space:
+predictors <- terra::rast(system.file("extdata","predictors_chile.tif", package="CAST"))
+
+set.seed(1234)
+dist <- geodist(x = splotdata,
+                modeldomain = predictors,
+                type = "feature",
+                variables = c("bio_1","bio_12", "elev"))
+plot(dist)
+
+set.seed(1234)
+dist_weighted_even <- geodist(x = splotdata,
+                         modeldomain = predictors,
+                         type = "feature",
+                         variables = c("bio_1","bio_12", "elev"),
+                         weight = data.frame(bio_1 = 1, bio_12 = 1, elev = 1))
+plot(dist_weighted_even)
+
+set.seed(1234)
+dist_weighted_uneven <- geodist(x = splotdata,
+                         modeldomain = predictors,
+                         type = "feature",
+                         variables = c("bio_1","bio_12", "elev"),
+                         weight = data.frame(bio_1 = 1, bio_12 = 0.5, elev = 0))
+plot(dist_weighted_uneven)
+plot(dist_weighted_uneven, stat = "ecdf")
+
+# Make sure only relative weights matter
+set.seed(1234)
+dist_weighted_uneven <- geodist(x = splotdata,
+                         modeldomain = predictors,
+                         type = "feature",
+                         variables = c("bio_1","bio_12", "elev"),
+                         weight = data.frame(bio_1 = 1, bio_12 = 0.5, elev = 0) * 2)
+plot(dist_weighted_uneven, stat = "ecdf")
+
+# Make sure order of weights doesnt matter
+set.seed(1234)
+dist_weighted_uneven <- geodist(x = splotdata,
+                         modeldomain = predictors,
+                         type = "feature",
+                         variables = c("bio_1","bio_12", "elev"),
+                         weight = data.frame(bio_12 = 0.5, bio_1 = 1, elev = 0))
+plot(dist_weighted_uneven, stat = "ecdf")
+
+# Make sure order of weights doesnt matter
+set.seed(1234)
+dist_weighted_uneven <- geodist(x = splotdata,
+                         modeldomain = predictors,
+                         type = "feature",
+                         variables = c("bio_1","bio_12", "elev"),
+                         weight = data.frame(bio_12 = 1, bio_1 = 0.5, elev = 0))
+plot(dist_weighted_uneven, stat = "ecdf")
+
+# Different example
+set.seed(1234)
+dist <- geodist(x = splotdata[splotdata$Country != "Chile",],
+                modeldomain = predictors, cvfolds = folds,
+                testdata = splotdata[splotdata$Country == "Chile",],
+                type = "feature",
+                variables=c("bio_1","bio_12", "elev"))
+plot(dist)
+
+set.seed(1234)
+dist_weighted_even <- geodist(x = splotdata[splotdata$Country != "Chile",],
+                modeldomain = predictors, cvfolds = folds,
+                testdata = splotdata[splotdata$Country == "Chile",],
+                type = "feature",
+                variables=c("bio_1","bio_12", "elev"),
+                weight = data.frame(bio_1 = 1, bio_12 = 1, elev = 1))
+plot(dist_weighted_even)
+
+set.seed(1234)
+dist_weighted_uneven <- geodist(x = splotdata[splotdata$Country != "Chile",],
+                modeldomain = predictors, cvfolds = folds,
+                testdata = splotdata[splotdata$Country == "Chile",],
+                type = "feature",
+                variables=c("bio_1","bio_12", "elev"),
+                weight = data.frame(bio_1 = 1, bio_12 = 0.5, elev = 0))
+plot(dist_weighted_uneven)
+```
+
+# `knndm`

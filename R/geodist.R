@@ -14,6 +14,7 @@
 #' @param samplesize numeric. How many prediction samples should be used?
 #' @param sampling character. How to draw prediction samples? See \link[sp]{spsample}. Use sampling = "Fibonacci" for global applications.
 #' @param variables character vector defining the predictor variables used if type="feature. If not provided all variables included in modeldomain are used.
+#' @param weight A data.frame containing weights for each variable, used if type="feature". Optional.
 #' @param timevar optional. character. Column that indicates the date. Only used if type="time".
 #' @param time_unit optional. Character. Unit for temporal distances See ?difftime.Only used if type="time".
 #' @param algorithm see \code{\link[FNN]{knnx.dist}} and \code{\link[FNN]{knnx.index}}
@@ -129,6 +130,7 @@ geodist <- function(x,
                     samplesize=2000,
                     sampling = "regular",
                     variables=NULL,
+                    weight=NULL,
                     timevar=NULL,
                     time_unit="auto",
                     algorithm="brute"){
@@ -211,6 +213,9 @@ geodist <- function(x,
                                 sf::st_drop_geometry(x)[,timevar]))
   }
 
+  if(!is.null(weight)) {
+    weight <- CAST:::user_weights(weight, variables)
+  }
 
 
   # required steps ----
@@ -223,22 +228,22 @@ geodist <- function(x,
   }
 
   # always do sample-to-sample and sample-to-prediction
-  s2s <- sample2sample(x, type,variables,time_unit,timevar, catVars, algorithm=algorithm)
-  s2p <- sample2prediction(x, modeldomain, type, samplesize,variables,time_unit,timevar, catVars, algorithm=algorithm)
+  s2s <- sample2sample(x, type,variables,weight,time_unit,timevar, catVars, algorithm=algorithm)
+  s2p <- sample2prediction(x, modeldomain, type, samplesize,variables,weight,time_unit,timevar, catVars, algorithm=algorithm)
 
   dists <- rbind(s2s, s2p)
 
   # optional steps ----
   ##### Distance to test data:
   if(!is.null(testdata)){
-    s2t <- sample2test(x, testdata, type,variables,time_unit,timevar, catVars, algorithm=algorithm)
+    s2t <- sample2test(x, testdata, type,variables,weight,time_unit,timevar, catVars, algorithm=algorithm)
     dists <- rbind(dists, s2t)
   }
 
   ##### Distance to CV data:
   if(!is.null(cvfolds)){
 
-    cvd <- cvdistance(x, cvfolds, cvtrain, type, variables,time_unit,timevar, catVars, algorithm=algorithm)
+    cvd <- cvdistance(x, cvfolds, cvtrain, type, variables,weight,time_unit,timevar, catVars, algorithm=algorithm)
     dists <- rbind(dists, cvd)
   }
   class(dists) <- c("geodist", class(dists))
@@ -272,7 +277,7 @@ geodist <- function(x,
 
 # Sample to Sample Distance
 
-sample2sample <- function(x, type,variables,time_unit,timevar, catVars, algorithm){
+sample2sample <- function(x, type,variables,weight,time_unit,timevar, catVars, algorithm){
   if(type == "geo"){
     sf::sf_use_s2(TRUE)
     d <- sf::st_distance(x)
@@ -296,6 +301,11 @@ sample2sample <- function(x, type,variables,time_unit,timevar, catVars, algorith
       scaleparam <- attributes(scale(x))
       x <- data.frame(scale(x))
       x_clean <- data.frame(x[complete.cases(x),])
+    }
+
+    # multiply data with user-supplied variable weights
+    if(!is.null(weight)){
+      x_clean <- sweep(x_clean, 2, unlist(weight), `*`)
     }
 
     # sample to sample feature distance
@@ -333,7 +343,7 @@ sample2sample <- function(x, type,variables,time_unit,timevar, catVars, algorith
 
 
 # Sample to Prediction
-sample2prediction = function(x, modeldomain, type, samplesize,variables,time_unit,timevar, catVars, algorithm){
+sample2prediction = function(x, modeldomain, type, samplesize,variables,weight,time_unit,timevar, catVars, algorithm){
 
   if(type == "geo"){
     modeldomain <- sf::st_transform(modeldomain, sf::st_crs(x))
@@ -375,6 +385,11 @@ sample2prediction = function(x, modeldomain, type, samplesize,variables,time_uni
                                       scale=scaleparam$`scaled:scale`))
     }
 
+    # multiply data with user-supplied variable weights
+    if(!is.null(weight)){
+      x_clean <- sweep(x_clean, 2, unlist(weight), `*`)
+      modeldomain <- sweep(modeldomain, 2, unlist(weight), `*`)
+    }
 
     target_dist_feature <- c()
     for (i in 1:nrow(modeldomain)){
@@ -412,7 +427,7 @@ sample2prediction = function(x, modeldomain, type, samplesize,variables,time_uni
 # sample to test
 
 
-sample2test <- function(x, testdata, type,variables,time_unit,timevar, catVars, algorithm){
+sample2test <- function(x, testdata, type,variables,weight,time_unit,timevar, catVars, algorithm){
 
   if(type == "geo"){
     testdata <- sf::st_transform(testdata,4326)
@@ -457,6 +472,11 @@ sample2test <- function(x, testdata, type,variables,time_unit,timevar, catVars, 
                                    scale=scaleparam$`scaled:scale`))
     }
 
+    # multiply data with user-supplied variable weights
+    if(!is.null(weight)){
+      x_clean <- sweep(x_clean, 2, unlist(weight), `*`)
+      testdata <- sweep(testdata, 2, unlist(weight), `*`)
+    }
 
     test_dist_feature <- c()
     for (i in 1:nrow(testdata)){
@@ -493,7 +513,7 @@ sample2test <- function(x, testdata, type,variables,time_unit,timevar, catVars, 
 
 # between folds
 
-cvdistance <- function(x, cvfolds, cvtrain, type, variables,time_unit,timevar, catVars, algorithm){
+cvdistance <- function(x, cvfolds, cvtrain, type, variables,weight,time_unit,timevar, catVars, algorithm){
 
   if(!is.null(cvfolds)&!is.list(cvfolds)){ # restructure input if CVtest only contains the fold ID
     tmp <- list()
@@ -548,6 +568,12 @@ cvdistance <- function(x, cvfolds, cvtrain, type, variables,time_unit,timevar, c
 
       testdata_i <- testdata_i[complete.cases(testdata_i),]
       traindata_i <- traindata_i[complete.cases(traindata_i),]
+
+      # multiply data with user-supplied variable weights
+      if(!is.null(weight)){
+        testdata_i <- sweep(testdata_i, 2, unlist(weight), `*`)
+        traindata_i <- sweep(traindata_i, 2, unlist(weight), `*`)
+      }
 
       for (k in 1:nrow(testdata_i)){
 
