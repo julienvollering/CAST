@@ -243,3 +243,228 @@ identical(dist_mixed$dist, dist_mixed_reorder$dist)
 ```
 
 # `knndm`
+
+Below are tests of `knndm()` with feature space weighting, following similar patterns to the `geodist()` tests above.
+
+## Basic knndm Tests with Continuous Variables
+
+```{r}
+# Basic knndm without weights for comparison  
+# Extract only the variables we want to use
+splotdata_subset <- splotdata[, c("bio_1","bio_12", "elev")]
+
+set.seed(1234)
+knndm_noweight <- knndm(tpoints = splotdata_subset,
+                       modeldomain = predictors[[c("bio_1","bio_12", "elev")]],
+                       space = "feature")
+
+# Check the fold structure
+knndm_noweight$indx_test
+plot(knndm_noweight, stat = "ecdf")
+
+# knndm with equal weights (should be equivalent to no weights)
+set.seed(1234)
+knndm_equal <- knndm(tpoints = splotdata_subset,
+                    modeldomain = predictors[[c("bio_1","bio_12", "elev")]],
+                    space = "feature",
+                    weight = data.frame(bio_1 = 1, bio_12 = 1, elev = 1))
+
+plot(knndm_equal, stat = "ecdf")
+
+# knndm with unequal weights - emphasizing bio_1, reducing bio_12, ignoring elev
+set.seed(1234)
+knndm_weighted <- knndm(tpoints = splotdata_subset,
+                       modeldomain = predictors[[c("bio_1","bio_12", "elev")]],
+                       space = "feature",
+                       weight = data.frame(bio_1 = 2, bio_12 = 0.5, elev = 0))
+
+plot(knndm_weighted, stat = "ecdf")
+
+# Compare W statistics to see the effect of weighting
+cat("No weights W statistic:", knndm_noweight$W, "\n")
+cat("Equal weights W statistic:", knndm_equal$W, "\n") 
+cat("Unequal weights W statistic:", knndm_weighted$W, "\n")
+
+# Test that relative weights matter (scaling by constant factor)
+set.seed(1234)
+knndm_scaled <- knndm(tpoints = splotdata_subset,
+                     modeldomain = predictors[[c("bio_1","bio_12", "elev")]],
+                     space = "feature",
+                     weight = data.frame(bio_1 = 2, bio_12 = 0.5, elev = 0) * 3)
+
+cat("Scaled weights W statistic:", knndm_scaled$W, "\n")
+# Should be identical to unequal weights
+identical(knndm_weighted$indx_test, knndm_scaled$indx_test)
+
+# Test that weight order doesn't matter
+set.seed(1234)
+knndm_reorder <- knndm(tpoints = splotdata_subset,
+                      modeldomain = predictors[[c("bio_1","bio_12", "elev")]],
+                      space = "feature",
+                      weight = data.frame(bio_12 = 0.5, elev = 0, bio_1 = 2))
+
+# Should be identical to original weighted version
+identical(knndm_weighted$indx_test, knndm_reorder$indx_test)
+cat("Weight order matters (should be TRUE):", identical(knndm_weighted$indx_test, knndm_reorder$indx_test), "\n")
+```
+
+## knndm Tests with Mixed Continuous and Categorical Variables
+
+Now let's test `knndm()` with realistic mixed continuous and categorical data using the splotdata dataset with the larger Chile raster. This demonstrates proper weighting functionality with mixed data types using Gower distances.
+
+```{r}
+# Prepare splotdata-based dataset with mixed continuous and categorical variables  
+# Using larger Chile raster for proper knndm functionality
+library(terra)
+data(splotdata)
+
+# Use splotdata (more spatial coverage) with Chile predictors (larger raster)
+predictors_large <- terra::rast(system.file("extdata","predictors_chile.tif", package="CAST"))
+
+# Prepare training data - use subset of splotdata for faster processing
+train_points <- splotdata[, c("bio_1", "bio_12", "elev")]
+
+# Create realistic categorical variables based on continuous predictors
+train_points$climate_zone <- factor(ifelse(train_points$bio_1 > 15, "warm",
+                                           ifelse(train_points$bio_1 > 5, "temperate", "cold")))
+
+train_points$precipitation_class <- factor(ifelse(train_points$bio_12 > 1500, "wet",
+                                                  ifelse(train_points$bio_12 > 800, "moderate", "dry")))
+
+train_points$elevation_class <- factor(ifelse(train_points$elev > 2000, "high",
+                                              ifelse(train_points$elev > 500, "medium", "low")))
+
+# Sample prediction points from the large raster domain
+set.seed(1234)
+prediction_points <- terra::spatSample(predictors_large[[c("bio_1", "bio_12", "elev")]], 1000, "regular")
+
+# Add matching categorical variables to prediction points
+prediction_points$climate_zone <- factor(ifelse(prediction_points$bio_1 > 15, "warm",
+                                                ifelse(prediction_points$bio_1 > 5, "temperate", "cold")))
+
+prediction_points$precipitation_class <- factor(ifelse(prediction_points$bio_12 > 1500, "wet",
+                                                       ifelse(prediction_points$bio_12 > 800, "moderate", "dry")))
+
+prediction_points$elevation_class <- factor(ifelse(prediction_points$elev > 2000, "high",
+                                                   ifelse(prediction_points$elev > 500, "medium", "low")))
+
+cat("Training data dimensions:", nrow(train_points), "x", ncol(train_points), "\n")
+cat("Prediction data dimensions:", nrow(prediction_points), "x", ncol(prediction_points), "\n")
+cat("Raster dimensions:", paste(dim(predictors_large)[1:2], collapse="x"), "\n")
+cat("Climate zones in training:", levels(train_points$climate_zone), "\n")
+cat("Precipitation classes in training:", levels(train_points$precipitation_class), "\n")
+cat("Elevation classes in training:", levels(train_points$elevation_class), "\n")
+
+### Basic Mixed Data Tests
+
+# Test 1: Mixed continuous + categorical data - no weights
+set.seed(1234)
+knndm_mixed_noweight <- knndm(tpoints = train_points,
+                             predpoints = prediction_points,
+                             space = "feature")
+
+plot(knndm_mixed_noweight, stat = "ecdf")
+cat("Mixed data no weights W statistic:", knndm_mixed_noweight$W, "\n")
+
+# Test 2: Mixed data with equal weights for all variables
+set.seed(1234)
+knndm_mixed_equal <- knndm(tpoints = train_points,
+                          predpoints = prediction_points,
+                          space = "feature",
+                          weight = data.frame(bio_1 = 1, bio_12 = 1, elev = 1, 
+                                            climate_zone = 1, precipitation_class = 1, elevation_class = 1))
+
+plot(knndm_mixed_equal, stat = "ecdf")
+cat("Mixed data equal weights W statistic:", knndm_mixed_equal$W, "\n")
+
+# Test 3: Mixed data with unequal weights - emphasizing continuous variables
+set.seed(1234)
+knndm_mixed_continuous_focus <- knndm(tpoints = train_points,
+                                     predpoints = prediction_points,
+                                     space = "feature",
+                                     weight = data.frame(bio_1 = 3, bio_12 = 2, elev = 1.5,
+                                                       climate_zone = 0.5, precipitation_class = 0.5, elevation_class = 0.5))
+
+plot(knndm_mixed_continuous_focus, stat = "ecdf")
+cat("Mixed data continuous-focused W statistic:", knndm_mixed_continuous_focus$W, "\n")
+
+# Test 4: Mixed data with unequal weights - emphasizing categorical variables  
+set.seed(1234)
+knndm_mixed_categorical_focus <- knndm(tpoints = train_points,
+                                      predpoints = prediction_points,
+                                      space = "feature",
+                                      weight = data.frame(bio_1 = 0.5, bio_12 = 0.5, elev = 0.5,
+                                                        climate_zone = 3, precipitation_class = 2, elevation_class = 3))
+
+plot(knndm_mixed_categorical_focus, stat = "ecdf")
+cat("Mixed data categorical-focused W statistic:", knndm_mixed_categorical_focus$W, "\n")
+
+### Categorical-Focused Weighting Tests
+
+# Test 5: Extreme categorical weighting - only categorical variables matter
+set.seed(1234)
+knndm_categorical_only <- knndm(tpoints = train_points,
+                               predpoints = prediction_points,
+                               space = "feature",
+                               weight = data.frame(bio_1 = 0.01, bio_12 = 0.01, elev = 0.01,
+                                                 climate_zone = 5, precipitation_class = 3, elevation_class = 5))
+
+plot(knndm_categorical_only, stat = "ecdf")
+cat("Categorical-only weighting W statistic:", knndm_categorical_only$W, "\n")
+
+# Test 6: Zero-weight categorical variables (continuous variables only)
+set.seed(1234)
+knndm_continuous_only <- knndm(tpoints = train_points,
+                              predpoints = prediction_points,
+                              space = "feature",
+                              weight = data.frame(bio_1 = 2, bio_12 = 1.5, elev = 1,
+                                                climate_zone = 0, precipitation_class = 0, elevation_class = 0))
+
+plot(knndm_continuous_only, stat = "ecdf")
+cat("Continuous-only weighting W statistic:", knndm_continuous_only$W, "\n")
+
+# Test 7: Single categorical variable dominance
+set.seed(1234)
+knndm_elevation_focus <- knndm(tpoints = train_points,
+                              predpoints = prediction_points,
+                              space = "feature",
+                              weight = data.frame(bio_1 = 0.1, bio_12 = 0.1, elev = 0.1,
+                                                climate_zone = 0.1, precipitation_class = 0.1, elevation_class = 10))
+
+plot(knndm_elevation_focus, stat = "ecdf")
+cat("Elevation-focused weighting W statistic:", knndm_elevation_focus$W, "\n")
+
+# Test 8: Weight order consistency with mixed data types
+set.seed(1234)
+knndm_reordered_mixed <- knndm(tpoints = train_points,
+                              predpoints = prediction_points,
+                              space = "feature",
+                              weight = data.frame(bio_1 = 3, elev = 1.5,
+                                                       climate_zone = 0.5, precipitation_class = 0.5, elevation_class = 0.5, bio_12 = 2))
+
+cat("Mixed weight order consistent (should be TRUE):", 
+    identical(knndm_mixed_continuous_focus$indx_test, knndm_reordered_mixed$indx_test), "\n")
+
+### Mixed Data Comparison Plots
+
+# Create comparison plots for mixed data weighting effects
+library(ggplot2)
+library(gridExtra)
+
+# Compare different mixed weighting approaches
+plot_mixed_noweight <- plot(knndm_mixed_noweight, stat = "ecdf") + 
+  ggtitle("Mixed Data: No Weights") + theme_minimal()
+
+plot_mixed_continuous <- plot(knndm_mixed_continuous_focus, stat = "ecdf") + 
+  ggtitle("Mixed Data: Continuous-Focused") + theme_minimal()
+
+plot_mixed_categorical <- plot(knndm_mixed_categorical_focus, stat = "ecdf") + 
+  ggtitle("Mixed Data: Categorical-Focused") + theme_minimal()
+
+plot_categorical_only <- plot(knndm_categorical_only, stat = "ecdf") + 
+  ggtitle("Categorical Variables Only") + theme_minimal()
+
+# Arrange mixed data plots in a 2x2 grid
+gridExtra::grid.arrange(plot_mixed_noweight, plot_mixed_continuous, 
+                       plot_mixed_categorical, plot_categorical_only, ncol=2)
+```

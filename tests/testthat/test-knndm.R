@@ -367,3 +367,157 @@ test_that("kNNDM works in feature space with Mahalanobis distance without cluste
                  "Gij <= Gj; a random CV assignment is returned")
 
 })
+
+test_that("kNNDM works with feature weights", {
+  set.seed(1234)
+
+  # prepare sample data with multiple predictors
+  data(cookfarm)
+  dat <- terra::aggregate(cookfarm[,c("DEM","TWI", "NDRE.M", "Easting", "Northing","VW")],
+                          by=list(as.character(cookfarm$SOURCEID)),mean)
+  pts <- dat[,-1]
+  pts <- sf::st_as_sf(pts,coords=c("Easting","Northing"))
+  sf::st_crs(pts) <- 26911
+  studyArea <- terra::rast(system.file("extdata","predictors_2012-03-25.tif",package="CAST"))
+  pts <- sf::st_transform(pts, crs = sf::st_crs(studyArea))
+
+  studyArea <- studyArea[[names(studyArea) %in% names(pts)]]
+  train_points <- pts[,names(pts) %in% names(studyArea)]
+
+  # Test with weights
+  weights <- data.frame(DEM = 2, TWI = 0.5, NDRE.M = 1)
+
+  # Run without weights
+  set.seed(1234)
+  kout_no_weight <- knndm(train_points, modeldomain = studyArea, space="feature", k=3)
+
+  # Run with weights
+  set.seed(1234)
+  kout_with_weight <- knndm(train_points, modeldomain = studyArea, space="feature",
+                           weight = weights, k=3)
+
+  # Results should be different when weights are applied
+  expect_false(identical(kout_no_weight$clusters, kout_with_weight$clusters))
+
+  # Check that weight parameter is properly processed
+  expect_no_error(knndm(train_points, modeldomain = studyArea, space="feature",
+                       weight = weights, k=3))
+
+})
+
+test_that("kNNDM works with feature weights and categorical variables", {
+  set.seed(1234)
+
+  # prepare sample data with categorical variable
+  data(cookfarm)
+  dat <- terra::aggregate(cookfarm[,c("DEM","TWI", "NDRE.M", "Easting", "Northing","VW")],
+                          by=list(as.character(cookfarm$SOURCEID)),mean)
+  pts <- dat[,-1]
+  pts <- sf::st_as_sf(pts,coords=c("Easting","Northing"))
+  sf::st_crs(pts) <- 26911
+  studyArea <- terra::rast(system.file("extdata","predictors_2012-03-25.tif",package="CAST"))
+  pts <- sf::st_transform(pts, crs = sf::st_crs(studyArea))
+
+  studyArea <- studyArea[[names(studyArea) %in% names(pts)]]
+  train_points <- pts[,names(pts) %in% names(studyArea)]
+
+  # Add categorical variable
+  train_points$category <- factor(sample(LETTERS[1:3], nrow(train_points), replace=TRUE))
+
+  # Create prediction points with same categorical variable
+  prediction_points <- terra::spatSample(studyArea, 100, "regular")
+  prediction_points$category <- factor(sample(LETTERS[1:3], nrow(prediction_points), replace=TRUE))
+
+  # Test with weights including categorical variable
+  weights <- data.frame(DEM = 2, TWI = 0.5, NDRE.M = 1, category = 1.5)
+
+  # Should work with categorical variables and weights
+  expect_no_error(knndm(train_points, predpoints = prediction_points, space="feature",
+                       weight = weights, k=3))
+
+  # Test weight validation - should give message for incorrect weights
+  bad_weights <- data.frame(nonexistent_var = 1)
+  expect_message(knndm(train_points, predpoints = prediction_points, space="feature",
+                      weight = bad_weights, k=3),
+                "variable weights are not correctly specified and will be ignored")
+
+})
+
+test_that("kNNDM weight parameter is ignored for geographical space", {
+  sf::sf_use_s2(TRUE)
+  aoi <- sf::st_as_sfc("POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))", crs="epsg:4326")
+  tpoints <- sf::st_as_sfc("MULTIPOINT ((1 1), (1 2), (2 2), (2 3), (1 4), (5 4))", crs="epsg:4326") |>
+    sf::st_cast("POINT")
+  set.seed(1)
+  predpoints <- suppressWarnings(sf::st_sample(aoi, 20, type="regular")) |>
+    sf::st_set_crs("epsg:4326")
+
+  # Weights should be ignored for geographical space
+  weights <- data.frame(var1 = 2, var2 = 0.5)
+
+  set.seed(1)
+  kout1 <- knndm(tpoints, predpoints=predpoints, k=2, maxp=0.8)
+
+  set.seed(1)
+  kout2 <- knndm(tpoints, predpoints=predpoints, k=2, maxp=0.8, weight=weights)
+
+  # Results should be identical since weights are ignored for geographical space
+  expect_identical(kout1$clusters, kout2$clusters)
+  expect_identical(kout1$W, kout2$W)
+
+})
+
+test_that("kNNDM weight order consistency with mixed categorical/continuous variables", {
+  set.seed(1234)
+
+  # Create test data with mixed continuous and categorical variables
+  data(splotdata)
+  train_points <- splotdata[1:500, c("bio_1", "bio_12", "elev")] # Use subset for faster testing
+
+  # Add categorical variables
+  train_points$climate_zone <- factor(ifelse(train_points$bio_1 > 15, "warm",
+                                            ifelse(train_points$bio_1 > 5, "temperate", "cold")))
+  train_points$elevation_class <- factor(ifelse(train_points$elev > 2000, "high",
+                                               ifelse(train_points$elev > 500, "medium", "low")))
+  length(levels(train_points$climate_zone)) == 3
+  length(levels(train_points$elevation_class)) == 3
+
+  # Create prediction points
+  predictors_large <- terra::rast(system.file("extdata","predictors_chile.tif", package="CAST"))
+  prediction_points <- terra::spatSample(predictors_large[[c("bio_1", "bio_12", "elev")]], 2000, "regular") |>
+    tidyr::drop_na()
+
+  # Add matching categorical variables to prediction points
+  prediction_points$climate_zone <- factor(ifelse(prediction_points$bio_1 > 15, "warm",
+                                                  ifelse(prediction_points$bio_1 > 5, "temperate", "cold")))
+  prediction_points$elevation_class <- factor(ifelse(prediction_points$elev > 2000, "high",
+                                                    ifelse(prediction_points$elev > 500, "medium", "low")))
+
+  # Test weight order consistency - same weights in different order
+  weights1 <- data.frame(bio_1 = 2, bio_12 = 1, elev = 0.5, climate_zone = 1.5, elevation_class = 0.8)
+  weights2 <- data.frame(elevation_class = 0.8, bio_12 = 1, climate_zone = 1.5, elev = 0.5, bio_1 = 2)
+
+  set.seed(1234)
+  kout1 <- knndm(train_points, predpoints = prediction_points, space="feature",
+                 weight = weights1, k=3, maxp=0.8)
+
+  set.seed(1234)
+  kout2 <- knndm(train_points, predpoints = prediction_points, space="feature",
+                 weight = weights2, k=3, maxp=0.8)
+
+  # Results should be identical regardless of weight order
+  expect_identical(kout1$indx_test, kout2$indx_test)
+  expect_identical(kout1$W, kout2$W)
+
+  # Test scaling invariance - weights scaled by constant factor
+  weights3 <- weights1 * 2.5
+
+  set.seed(1234)
+  kout3 <- knndm(train_points, predpoints = prediction_points, space="feature",
+                 weight = weights3, k=3, maxp=0.8)
+
+  # Should be identical to original since only relative weights matter
+  expect_identical(kout1$indx_test, kout3$indx_test)
+  expect_identical(kout1$W, kout3$W)
+
+})

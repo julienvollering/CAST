@@ -19,6 +19,7 @@
 #' Only required if modeldomain is used instead of predpoints.
 #' @param useMD boolean. Only for `space`=feature: shall the Mahalanobis distance be calculated instead of Euclidean?
 #' Only works with numerical variables.
+#' @param weight A data.frame containing weights for each variable, used if space="feature". Optional.
 #' @param algorithm see \code{\link[FNN]{knnx.dist}} and \code{\link[FNN]{knnx.index}}
 #' @return An object of class \emph{knndm} consisting of a list of eight elements:
 #' indx_train, indx_test (indices of the observations to use as
@@ -208,6 +209,7 @@ knndm <- function(tpoints, modeldomain = NULL, predpoints = NULL,
                   k = 10, maxp = 0.5,
                   clustering = "hierarchical", linkf = "ward.D2",
                   samplesize = 1000, sampling = "regular", useMD=FALSE,
+                  weight=NULL,
                   algorithm="brute"){
 
   # create sample points from modeldomain
@@ -263,6 +265,16 @@ knndm <- function(tpoints, modeldomain = NULL, predpoints = NULL,
     }
   }
 
+  # Validate weight parameter if provided
+  if(!is.null(weight) && space == "feature") {
+    # Get variable names from tpoints for weight validation
+    if(any(class(tpoints) %in% c("sf","sfc"))) {
+      variables <- names(sf::st_set_geometry(tpoints, NULL))
+    } else {
+      variables <- names(tpoints)
+    }
+    weight <- CAST:::user_weights(weight, variables)
+  }
 
   # Conditional preprocessing actions
   if(space == "geographical") {
@@ -322,7 +334,7 @@ knndm <- function(tpoints, modeldomain = NULL, predpoints = NULL,
     # prior checks
     check_knndm_feature(tpoints, predpoints, space, k, maxp, clustering, islonglat, catVars,useMD)
     # kNNDM in feature space
-    knndm_res <- knndm_feature(tpoints, predpoints, k, maxp, clustering, linkf, catVars, useMD, algorithm=algorithm)
+    knndm_res <- knndm_feature(tpoints, predpoints, k, maxp, clustering, linkf, catVars, useMD, weight, algorithm=algorithm)
 
   }
 
@@ -512,7 +524,7 @@ knndm_geo <- function(tpoints, predpoints, k, maxp, clustering, linkf, islonglat
 
 
 # kNNDM in the feature space
-knndm_feature <- function(tpoints, predpoints, k, maxp, clustering, linkf, catVars, useMD, algorithm) {
+knndm_feature <- function(tpoints, predpoints, k, maxp, clustering, linkf, catVars, useMD, weight, algorithm) {
 
   # rescale data
   if(is.null(catVars)) {
@@ -540,6 +552,15 @@ knndm_feature <- function(tpoints, predpoints, k, maxp, clustering, linkf, catVa
 
   }
 
+  # Apply weights if provided
+  if(!is.null(weight)) {
+    if(is.null(catVars)) {
+      # For continuous-only data, apply weights using sweep() before distance calculation
+      tpoints <- sweep(tpoints, 2, unlist(weight), `*`)
+      predpoints <- sweep(predpoints, 2, unlist(weight), `*`)
+    }
+    # For categorical data, weights will be passed to gower functions below
+  }
 
   # Gj and Gij calculation
   if(is.null(catVars)) {
@@ -587,8 +608,14 @@ knndm_feature <- function(tpoints, predpoints, k, maxp, clustering, linkf, catVa
   } else {
 
     # use Gower distances if categorical variables are present
-    Gj <- sapply(1:nrow(tpoints), function(i) gower::gower_topn(tpoints[i,], tpoints[-i,], n=1)$distance[[1]])
-    Gij <- c(gower::gower_topn(predpoints, tpoints, n = 1)$distance)
+    if(!is.null(weight)) {
+      # Pass weights to gower functions when categorical variables are present
+      Gj <- sapply(1:nrow(tpoints), function(i) gower::gower_topn(tpoints[i,], tpoints[-i,], n=1, weights=unlist(weight))$distance[[1]])
+      Gij <- c(gower::gower_topn(predpoints, tpoints, n = 1, weights=unlist(weight))$distance)
+    } else {
+      Gj <- sapply(1:nrow(tpoints), function(i) gower::gower_topn(tpoints[i,], tpoints[-i,], n=1)$distance[[1]])
+      Gij <- c(gower::gower_topn(predpoints, tpoints, n = 1)$distance)
+    }
 
   }
 
@@ -601,13 +628,13 @@ knndm_feature <- function(tpoints, predpoints, k, maxp, clustering, linkf, catVa
 
     if(is.null(catVars)) {
       if(isTRUE(useMD)) {
-        Gjstar <- distclust_MD(tpoints, clust)
+        Gjstar <- distclust_MD(tpoints, clust, weight)
       } else {
-        Gjstar <- distclust_euclidean(tpoints, clust,algorithm=algorithm)
+        Gjstar <- distclust_euclidean(tpoints, clust, weight, algorithm=algorithm)
       }
 
     } else {
-      Gjstar <- distclust_gower(tpoints, clust)
+      Gjstar <- distclust_gower(tpoints, clust, weight)
     }
 
     k_final <- "random CV"
@@ -634,7 +661,11 @@ knndm_feature <- function(tpoints, predpoints, k, maxp, clustering, linkf, catVa
         distmat <- matrix(nrow=nrow(tpoints), ncol=nrow(tpoints))
         for (i in 1:nrow(tpoints)){
 
-          trainDist <-  gower::gower_dist(tpoints[i,], tpoints)
+          if(!is.null(weight)) {
+            trainDist <-  gower::gower_dist(tpoints[i,], tpoints, weights=unlist(weight))
+          } else {
+            trainDist <-  gower::gower_dist(tpoints[i,], tpoints)
+          }
 
           trainDist[i] <- NA
           distmat[i,] <- trainDist
@@ -728,12 +759,12 @@ knndm_feature <- function(tpoints, predpoints, k, maxp, clustering, linkf, catVa
           if(clustering == "kmeans") {
             if(is.null(catVars)) {
               if(isTRUE(useMD)){
-                Gjstar_i <- distclust_MD(tpoints, clust_k)
+                Gjstar_i <- distclust_MD(tpoints, clust_k, weight)
               } else {
-                Gjstar_i <- distclust_euclidean(tpoints, clust_k,algorithm=algorithm)
+                Gjstar_i <- distclust_euclidean(tpoints, clust_k, weight, algorithm=algorithm)
               }
             } else {
-              Gjstar_i <- distclust_gower(tpoints, clust_k)
+              Gjstar_i <- distclust_gower(tpoints, clust_k, weight)
             }
 
           } else {
@@ -756,13 +787,13 @@ knndm_feature <- function(tpoints, predpoints, k, maxp, clustering, linkf, catVa
     if(clustering == "kmeans") {
       if(is.null(catVars)) {
         if(isTRUE(useMD)) {
-          Gjstar <- distclust_MD(tpoints, clust)
+          Gjstar <- distclust_MD(tpoints, clust, weight)
         } else {
-          Gjstar <- distclust_euclidean(tpoints, clust,algorithm=algorithm)
+          Gjstar <- distclust_euclidean(tpoints, clust, weight, algorithm=algorithm)
         }
 
       } else {
-        Gjstar <- distclust_gower(tpoints, clust)
+        Gjstar <- distclust_gower(tpoints, clust, weight)
       }
     } else {
       Gjstar <- distclust_distmat(distmat, clust)
@@ -792,7 +823,8 @@ distclust_distmat <- function(distm, folds){
 }
 
 # Helper function: Compute out-of-fold NN distance (projected coordinates / numerical variables)
-distclust_euclidean <- function(tr_coords, folds, algorithm){
+distclust_euclidean <- function(tr_coords, folds, weight=NULL, algorithm){
+  # Apply weights if provided (weights were already applied in main function for continuous data)
   alldist <- rep(NA, length(folds))
   for(f in unique(folds)){
     alldist[f == folds] <- c(FNN::knnx.dist(query = tr_coords[f == folds,,drop=FALSE],
@@ -802,19 +834,24 @@ distclust_euclidean <- function(tr_coords, folds, algorithm){
 }
 
 # Helper function: Compute out-of-fold NN distance (categorical variables)
-distclust_gower <- function(tr_coords, folds){
+distclust_gower <- function(tr_coords, folds, weight=NULL){
 
   alldist <- rep(NA, length(folds))
   for(f in unique(folds)){
-    alldist[f == folds] <- c(gower::gower_topn(tr_coords[f == folds,,drop=FALSE],
-                                               tr_coords[f != folds,,drop=FALSE], n=1))$distance[[1]]
+    if(!is.null(weight)) {
+      alldist[f == folds] <- c(gower::gower_topn(tr_coords[f == folds,,drop=FALSE],
+                                                 tr_coords[f != folds,,drop=FALSE], n=1, weights=unlist(weight))$distance[[1]])
+    } else {
+      alldist[f == folds] <- c(gower::gower_topn(tr_coords[f == folds,,drop=FALSE],
+                                                 tr_coords[f != folds,,drop=FALSE], n=1)$distance[[1]])
+    }
   }
   unlist(alldist)
 }
 
 # Helper function: Compute out-of-fold NN distance (Mahalanobian distance)
-distclust_MD <- function(tr_coords, folds){
-
+distclust_MD <- function(tr_coords, folds, weight=NULL){
+  # For Mahalanobis distance, weights were already applied in main function for continuous data
   tr_mat <- as.matrix(tr_coords)
 
   S <- stats::cov(tr_mat)
