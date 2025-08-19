@@ -303,8 +303,8 @@ sample2sample <- function(x, type,variables,weight,time_unit,timevar, catVars, a
       x_clean <- data.frame(x[complete.cases(x),])
     }
 
-    # multiply data with user-supplied variable weights
-    if(!is.null(weight)){
+    # multiply data with user-supplied variable weights (only for non-categorical case)
+    if(!is.null(weight) && is.null(catVars)){
       x_clean <- sweep(x_clean, 2, unlist(weight), `*`)
     }
 
@@ -315,7 +315,12 @@ sample2sample <- function(x, type,variables,weight,time_unit,timevar, catVars, a
       if(is.null(catVars)) {
         trainDist <-  FNN::knnx.dist(x_clean[i,],x_clean,k=1, algorithm=algorithm)
       } else {
-        trainDist <- gower::gower_dist(x_clean[i,],x_clean)
+        # use gower distance with weights parameter for categorical variables
+        if(!is.null(weight)){
+          trainDist <- gower::gower_dist(x_clean[i,],x_clean, weights=unlist(weight))
+        } else {
+          trainDist <- gower::gower_dist(x_clean[i,],x_clean)
+        }
       }
 
       trainDist[i] <- NA
@@ -385,8 +390,8 @@ sample2prediction = function(x, modeldomain, type, samplesize,variables,weight,t
                                       scale=scaleparam$`scaled:scale`))
     }
 
-    # multiply data with user-supplied variable weights
-    if(!is.null(weight)){
+    # multiply data with user-supplied variable weights (only for non-categorical case)
+    if(!is.null(weight) && is.null(catVars)){
       x_clean <- sweep(x_clean, 2, unlist(weight), `*`)
       modeldomain <- sweep(modeldomain, 2, unlist(weight), `*`)
     }
@@ -397,7 +402,12 @@ sample2prediction = function(x, modeldomain, type, samplesize,variables,weight,t
       if(is.null(catVars)) {
         trainDist <-  FNN::knnx.dist(modeldomain[i,],x_clean,k=1, algorithm=algorithm)
       } else {
-        trainDist <- gower::gower_dist(modeldomain[i,], x_clean)
+        # use gower distance with weights parameter for categorical variables
+        if(!is.null(weight)){
+          trainDist <- gower::gower_dist(modeldomain[i,], x_clean, weights=unlist(weight))
+        } else {
+          trainDist <- gower::gower_dist(modeldomain[i,], x_clean)
+        }
       }
 
       target_dist_feature <- c(target_dist_feature,min(trainDist,na.rm=T))
@@ -472,8 +482,8 @@ sample2test <- function(x, testdata, type,variables,weight,time_unit,timevar, ca
                                    scale=scaleparam$`scaled:scale`))
     }
 
-    # multiply data with user-supplied variable weights
-    if(!is.null(weight)){
+    # multiply data with user-supplied variable weights (only for non-categorical case)
+    if(!is.null(weight) && is.null(catVars)){
       x_clean <- sweep(x_clean, 2, unlist(weight), `*`)
       testdata <- sweep(testdata, 2, unlist(weight), `*`)
     }
@@ -484,7 +494,12 @@ sample2test <- function(x, testdata, type,variables,weight,time_unit,timevar, ca
       if(is.null(catVars)) {
         testDist <- FNN::knnx.dist(testdata[i,],x_clean,k=1, algorithm=algorithm)
       } else {
-        testDist <- gower::gower_dist(testdata[i,], x_clean)
+        # use gower distance with weights parameter for categorical variables
+        if(!is.null(weight)){
+          testDist <- gower::gower_dist(testdata[i,], x_clean, weights=unlist(weight))
+        } else {
+          testDist <- gower::gower_dist(testdata[i,], x_clean)
+        }
       }
       test_dist_feature <- c(test_dist_feature,min(testDist,na.rm=T))
     }
@@ -569,8 +584,8 @@ cvdistance <- function(x, cvfolds, cvtrain, type, variables,weight,time_unit,tim
       testdata_i <- testdata_i[complete.cases(testdata_i),]
       traindata_i <- traindata_i[complete.cases(traindata_i),]
 
-      # multiply data with user-supplied variable weights
-      if(!is.null(weight)){
+      # multiply data with user-supplied variable weights (only for non-categorical case)
+      if(!is.null(weight) && is.null(catVars)){
         testdata_i <- sweep(testdata_i, 2, unlist(weight), `*`)
         traindata_i <- sweep(traindata_i, 2, unlist(weight), `*`)
       }
@@ -586,8 +601,14 @@ cvdistance <- function(x, cvfolds, cvtrain, type, variables,weight,time_unit,tim
                   Possibly because predictor values are NA")
           }
         } else {
-          trainDist <-  tryCatch(gower::gower_dist(testdata_i[i,], traindata_i),
-                                 error = function(e)e)
+          # use gower distance with weights parameter for categorical variables (fix index bug too)
+          if(!is.null(weight)){
+            trainDist <-  tryCatch(gower::gower_dist(testdata_i[k,], traindata_i, weights=unlist(weight)),
+                                   error = function(e)e)
+          } else {
+            trainDist <-  tryCatch(gower::gower_dist(testdata_i[k,], traindata_i),
+                                   error = function(e)e)
+          }
           if(inherits(trainDist, "error")){
             trainDist <- NA
             message("warning: no distance could be calculated for a fold.
