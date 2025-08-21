@@ -325,28 +325,35 @@ predictors_large <- terra::rast(system.file("extdata","predictors_chile.tif", pa
 train_points <- splotdata[, c("bio_1", "bio_12", "elev")]
 
 # Create realistic categorical variables based on continuous predictors
-train_points$climate_zone <- factor(ifelse(train_points$bio_1 > 15, "warm",
-                                           ifelse(train_points$bio_1 > 5, "temperate", "cold")))
+train_points$climate_zone <- factor(
+  ifelse(train_points$bio_1 > 15, "warm",
+         ifelse(train_points$bio_1 > 5, "temperate", "cold")))
 
-train_points$precipitation_class <- factor(ifelse(train_points$bio_12 > 1500, "wet",
-                                                  ifelse(train_points$bio_12 > 800, "moderate", "dry")))
+train_points$precipitation_class <- factor(
+  ifelse(train_points$bio_12 > 1500, "wet",
+         ifelse(train_points$bio_12 > 800, "moderate", "dry")))
 
-train_points$elevation_class <- factor(ifelse(train_points$elev > 2000, "high",
-                                              ifelse(train_points$elev > 500, "medium", "low")))
+train_points$elevation_class <- factor(
+  ifelse(train_points$elev > 2000, "high",
+         ifelse(train_points$elev > 500, "medium", "low")))
 
 # Sample prediction points from the large raster domain
 set.seed(1234)
-prediction_points <- terra::spatSample(predictors_large[[c("bio_1", "bio_12", "elev")]], 1000, "regular")
+prediction_points <- terra::spatSample(
+  predictors_large[[c("bio_1", "bio_12", "elev")]], 1000, "regular")
 
 # Add matching categorical variables to prediction points
-prediction_points$climate_zone <- factor(ifelse(prediction_points$bio_1 > 15, "warm",
-                                                ifelse(prediction_points$bio_1 > 5, "temperate", "cold")))
+prediction_points$climate_zone <- factor(
+  ifelse(prediction_points$bio_1 > 15, "warm",
+         ifelse(prediction_points$bio_1 > 5, "temperate", "cold")))
 
-prediction_points$precipitation_class <- factor(ifelse(prediction_points$bio_12 > 1500, "wet",
-                                                       ifelse(prediction_points$bio_12 > 800, "moderate", "dry")))
+prediction_points$precipitation_class <- factor(
+  ifelse(prediction_points$bio_12 > 1500, "wet",
+         ifelse(prediction_points$bio_12 > 800, "moderate", "dry")))
 
-prediction_points$elevation_class <- factor(ifelse(prediction_points$elev > 2000, "high",
-                                                   ifelse(prediction_points$elev > 500, "medium", "low")))
+prediction_points$elevation_class <- factor(
+  ifelse(prediction_points$elev > 2000, "high",
+         ifelse(prediction_points$elev > 500, "medium", "low")))
 
 cat("Training data dimensions:", nrow(train_points), "x", ncol(train_points), "\n")
 cat("Prediction data dimensions:", nrow(prediction_points), "x", ncol(prediction_points), "\n")
@@ -359,42 +366,58 @@ cat("Elevation classes in training:", levels(train_points$elevation_class), "\n"
 
 # Test 1: Mixed continuous + categorical data - no weights
 set.seed(1234)
-knndm_mixed_noweight <- knndm(tpoints = train_points,
-                             predpoints = prediction_points,
-                             space = "feature")
+knndm_mixed_noweight <- knndm(
+  tpoints = train_points,
+  predpoints = prediction_points,
+  space = "feature")
 
 plot(knndm_mixed_noweight, stat = "ecdf")
 cat("Mixed data no weights W statistic:", knndm_mixed_noweight$W, "\n")
 
 # Test 2: Mixed data with equal weights for all variables
 set.seed(1234)
-knndm_mixed_equal <- knndm(tpoints = train_points,
-                          predpoints = prediction_points,
-                          space = "feature",
-                          weight = data.frame(bio_1 = 1, bio_12 = 1, elev = 1, 
-                                            climate_zone = 1, precipitation_class = 1, elevation_class = 1))
+knndm_mixed_equal <- knndm(
+  tpoints = train_points,
+  predpoints = prediction_points,
+  space = "feature",
+  weight = data.frame(bio_1 = 1, 
+                      bio_12 = 1, 
+                      elev = 1, 
+                      climate_zone = 1, 
+                      precipitation_class = 1, 
+                      elevation_class = 1))
 
 plot(knndm_mixed_equal, stat = "ecdf")
 cat("Mixed data equal weights W statistic:", knndm_mixed_equal$W, "\n")
 
 # Test 3: Mixed data with unequal weights - emphasizing continuous variables
 set.seed(1234)
-knndm_mixed_continuous_focus <- knndm(tpoints = train_points,
-                                     predpoints = prediction_points,
-                                     space = "feature",
-                                     weight = data.frame(bio_1 = 3, bio_12 = 2, elev = 1.5,
-                                                       climate_zone = 0.5, precipitation_class = 0.5, elevation_class = 0.5))
+knndm_mixed_continuous_focus <- knndm(
+  tpoints = train_points,
+  predpoints = prediction_points,
+  space = "feature",
+  weight = data.frame(bio_1 = 3, 
+                      bio_12 = 2, 
+                      elev = 1.5,
+                      climate_zone = 0.5, 
+                      precipitation_class = 0.5, 
+                      elevation_class = 0.5))
 
 plot(knndm_mixed_continuous_focus, stat = "ecdf")
 cat("Mixed data continuous-focused W statistic:", knndm_mixed_continuous_focus$W, "\n")
 
 # Test 4: Mixed data with unequal weights - emphasizing categorical variables  
 set.seed(1234)
-knndm_mixed_categorical_focus <- knndm(tpoints = train_points,
-                                      predpoints = prediction_points,
-                                      space = "feature",
-                                      weight = data.frame(bio_1 = 0.5, bio_12 = 0.5, elev = 0.5,
-                                                        climate_zone = 3, precipitation_class = 2, elevation_class = 3))
+knndm_mixed_categorical_focus <- knndm(
+  tpoints = train_points,
+  predpoints = prediction_points,
+  space = "feature",
+  weight = data.frame(bio_1 = 0.5, 
+                      bio_12 = 0.5, 
+                      elev = 0.5,
+                      climate_zone = 3, 
+                      precipitation_class = 2, 
+                      elevation_class = 3))
 
 plot(knndm_mixed_categorical_focus, stat = "ecdf")
 cat("Mixed data categorical-focused W statistic:", knndm_mixed_categorical_focus$W, "\n")
@@ -403,44 +426,64 @@ cat("Mixed data categorical-focused W statistic:", knndm_mixed_categorical_focus
 
 # Test 5: Extreme categorical weighting - only categorical variables matter
 set.seed(1234)
-knndm_categorical_only <- knndm(tpoints = train_points,
-                               predpoints = prediction_points,
-                               space = "feature",
-                               weight = data.frame(bio_1 = 0.01, bio_12 = 0.01, elev = 0.01,
-                                                 climate_zone = 5, precipitation_class = 3, elevation_class = 5))
+knndm_categorical_only <- knndm(
+  tpoints = train_points,
+  predpoints = prediction_points,
+  space = "feature",
+  weight = data.frame(bio_1 = 0.01, 
+                      bio_12 = 0.01, 
+                      elev = 0.01,
+                      climate_zone = 5, 
+                      precipitation_class = 3, 
+                      elevation_class = 5))
 
 plot(knndm_categorical_only, stat = "ecdf")
 cat("Categorical-only weighting W statistic:", knndm_categorical_only$W, "\n")
 
 # Test 6: Zero-weight categorical variables (continuous variables only)
 set.seed(1234)
-knndm_continuous_only <- knndm(tpoints = train_points,
-                              predpoints = prediction_points,
-                              space = "feature",
-                              weight = data.frame(bio_1 = 2, bio_12 = 1.5, elev = 1,
-                                                climate_zone = 0, precipitation_class = 0, elevation_class = 0))
+knndm_continuous_only <- knndm(
+  tpoints = train_points,
+  predpoints = prediction_points,
+  space = "feature",
+  weight = data.frame(bio_1 = 2, 
+                      bio_12 = 1.5, 
+                      elev = 1,
+                      climate_zone = 0, 
+                      precipitation_class = 0, 
+                      elevation_class = 0))
 
 plot(knndm_continuous_only, stat = "ecdf")
 cat("Continuous-only weighting W statistic:", knndm_continuous_only$W, "\n")
 
 # Test 7: Single categorical variable dominance
 set.seed(1234)
-knndm_elevation_focus <- knndm(tpoints = train_points,
-                              predpoints = prediction_points,
-                              space = "feature",
-                              weight = data.frame(bio_1 = 0.1, bio_12 = 0.1, elev = 0.1,
-                                                climate_zone = 0.1, precipitation_class = 0.1, elevation_class = 10))
+knndm_elevation_focus <- knndm(
+  tpoints = train_points,
+  predpoints = prediction_points,
+  space = "feature",
+  weight = data.frame(bio_1 = 0.1, 
+                      bio_12 = 0.1, 
+                      elev = 0.1,
+                      climate_zone = 0.1, 
+                      precipitation_class = 0.1, 
+                      elevation_class = 10))
 
 plot(knndm_elevation_focus, stat = "ecdf")
 cat("Elevation-focused weighting W statistic:", knndm_elevation_focus$W, "\n")
 
 # Test 8: Weight order consistency with mixed data types
 set.seed(1234)
-knndm_reordered_mixed <- knndm(tpoints = train_points,
-                              predpoints = prediction_points,
-                              space = "feature",
-                              weight = data.frame(bio_1 = 3, elev = 1.5,
-                                                       climate_zone = 0.5, precipitation_class = 0.5, elevation_class = 0.5, bio_12 = 2))
+knndm_reordered_mixed <- knndm(
+  tpoints = train_points,
+  predpoints = prediction_points,
+  space = "feature",
+  weight = data.frame(bio_1 = 3, 
+                      elev = 1.5,
+                      climate_zone = 0.5, 
+                      precipitation_class = 0.5, 
+                      elevation_class = 0.5, 
+                      bio_12 = 2))
 
 cat("Mixed weight order consistent (should be TRUE):", 
     identical(knndm_mixed_continuous_focus$indx_test, knndm_reordered_mixed$indx_test), "\n")
@@ -466,5 +509,21 @@ plot_categorical_only <- plot(knndm_categorical_only, stat = "ecdf") +
 
 # Arrange mixed data plots in a 2x2 grid
 gridExtra::grid.arrange(plot_mixed_noweight, plot_mixed_continuous, 
-                       plot_mixed_categorical, plot_categorical_only, ncol=2)
+                        plot_mixed_categorical, plot_categorical_only, ncol=2)
 ```
+
+## Basic knndm Tests with case data
+
+```{r}
+tpoints <- readRDS("inst/extdata/DMraisedbog/tpoints.rds")
+predpoints <- readRDS("inst/extdata/DMraisedbog/predpoints.rds")
+
+set.seed(1234)
+knndm_unweighted <- knndm(
+  tpoints = tpoints,
+  predpoints = predpoints,
+  space = "feature",
+  weight = NULL)
+
+```
+
