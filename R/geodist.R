@@ -14,7 +14,7 @@
 #' @param samplesize numeric. How many prediction samples should be used?
 #' @param sampling character. How to draw prediction samples? See \link[sp]{spsample}. Use sampling = "Fibonacci" for global applications.
 #' @param variables character vector defining the predictor variables used if type="feature. If not provided all variables included in modeldomain are used.
-#' @param weight A data.frame containing weights for each variable, used if type="feature". Optional.
+#' @param weight A data.frame with one row and columns named after the variables, containing weights for each variable, used if type="feature". Optional.
 #' @param timevar optional. character. Column that indicates the date. Only used if type="time".
 #' @param time_unit optional. Character. Unit for temporal distances See ?difftime.Only used if type="time".
 #' @param algorithm see \code{\link[FNN]{knnx.dist}} and \code{\link[FNN]{knnx.index}}

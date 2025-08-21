@@ -47,7 +47,7 @@ Only required if modeldomain is used instead of predpoints.}
 \item{useMD}{boolean. Only for `space`=feature: shall the Mahalanobis distance be calculated instead of Euclidean?
 Only works with numerical variables.}
 
-\item{weight}{A data.frame containing weights for each variable, used if space="feature". Optional.}
+\item{weight}{A data.frame with one row and columns named after the variables, containing weights for each variable, used if type="feature". Optional.}
 
 \item{algorithm}{see \code{\link[FNN]{knnx.dist}} and \code{\link[FNN]{knnx.index}}}
 }

@@ -44,7 +44,7 @@ locations within the modeldomain rather than the whole area.}
 
 \item{variables}{character vector defining the predictor variables used if type="feature. If not provided all variables included in modeldomain are used.}
 
-\item{weight}{A data.frame containing weights for each variable, used if type="feature". Optional.}
+\item{weight}{A data.frame with one row and columns named after the variables, containing weights for each variable, used if type="feature". Optional.}
 
 \item{timevar}{optional. character. Column that indicates the date. Only used if type="time".}
 

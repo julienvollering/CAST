@@ -19,7 +19,7 @@
 #' Only required if modeldomain is used instead of predpoints.
 #' @param useMD boolean. Only for `space`=feature: shall the Mahalanobis distance be calculated instead of Euclidean?
 #' Only works with numerical variables.
-#' @param weight A data.frame containing weights for each variable, used if space="feature". Optional.
+#' @param weight A data.frame with one row and columns named after the variables, containing weights for each variable, used if type="feature". Optional.
 #' @param algorithm see \code{\link[FNN]{knnx.dist}} and \code{\link[FNN]{knnx.index}}
 #' @return An object of class \emph{knndm} consisting of a list of eight elements:
 #' indx_train, indx_test (indices of the observations to use as
