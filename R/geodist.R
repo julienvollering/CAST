@@ -272,8 +272,51 @@ geodist <- function(x,
   return(dists)
 }
 
+# Geodist fast
+# Lots of overhead in the geodist() function, so use internals sample2sample() and sample2prediction()
 
+geodist.fast <- function(sample, prediction, weights, samplesize, seed) {
 
+  if (!missing(seed)) {set.seed(seed)}
+  sample_sampled <- sample[sample.int(min(nrow(sample), samplesize)),]
+  prediction_sampled <- prediction[sample.int(min(nrow(prediction), samplesize)),]
+
+  stopifnot(names(sample) == names(prediction))
+  if (!is.null(weights)) {
+    weights.sample <- weights[names(weights) %in% names(sample)]
+  }
+
+  s2s <- CAST:::sample2sample(
+    x = sample_sampled,
+    type = "feature",
+    variables = names(sample),
+    weight = weights,
+    time_unit = "auto",
+    timevar = NULL,
+    catVars = NULL,
+    algorithm = "brute"
+  )
+  s2p <- CAST:::sample2prediction(
+    x = sample_sampled,
+    modeldomain = prediction_sampled,
+    type = "feature",
+    samplesize = 1e4, # Not used in function
+    variables = names(sample),
+    weight = weights,
+    time_unit = "auto",
+    timevar = NULL,
+    catVars = NULL,
+    algorithm = "brute"
+  )
+  dists <- rbind(s2s, s2p)
+  class(dists) <- c("geodist", class(dists))
+  attr(dists, "type") <- "feature"
+  # Compute W statistics
+  W_sample <- twosamples::wass_stat(dists[dists$what == "sample-to-sample", "dist"],
+                                    dists[dists$what == "prediction-to-sample", "dist"])
+  attr(dists, "W_sample") <- W_sample
+  return(dists)
+}
 
 # Sample to Sample Distance
 
