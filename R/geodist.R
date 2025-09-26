@@ -275,13 +275,15 @@ geodist <- function(x,
 # Geodist fast
 # Lots of overhead in the geodist() function, so use internals sample2sample() and sample2prediction()
 
-geodist.fast <- function(sample, prediction, weights, samplesize, seed) {
+geodist.fast <- function(sample, prediction, cvfolds = NULL, variables, normalize, weights, samplesize, seed) {
 
   if (!missing(seed)) {set.seed(seed)}
+  if(!is.null(cvfolds)){
+    sample <- cbind(sample, cvfolds = cvfolds)
+  }
   sample_sampled <- sample[sample.int(min(nrow(sample), samplesize)),]
   prediction_sampled <- prediction[sample.int(min(nrow(prediction), samplesize)),]
 
-  stopifnot(names(sample) == names(prediction))
   if (!is.null(weights)) {
     weights.sample <- weights[names(weights) %in% names(sample)]
   }
@@ -289,7 +291,8 @@ geodist.fast <- function(sample, prediction, weights, samplesize, seed) {
   s2s <- CAST:::sample2sample(
     x = sample_sampled,
     type = "feature",
-    variables = names(sample),
+    variables = variables,
+    normalize = normalize,
     weight = weights,
     time_unit = "auto",
     timevar = NULL,
@@ -301,13 +304,15 @@ geodist.fast <- function(sample, prediction, weights, samplesize, seed) {
     modeldomain = prediction_sampled,
     type = "feature",
     samplesize = 1e4, # Not used in function
-    variables = names(sample),
+    variables = variables,
+    normalize = normalize,
     weight = weights,
     time_unit = "auto",
     timevar = NULL,
     catVars = NULL,
     algorithm = "brute"
   )
+
   dists <- rbind(s2s, s2p)
   class(dists) <- c("geodist", class(dists))
   attr(dists, "type") <- "feature"
@@ -315,12 +320,33 @@ geodist.fast <- function(sample, prediction, weights, samplesize, seed) {
   W_sample <- twosamples::wass_stat(dists[dists$what == "sample-to-sample", "dist"],
                                     dists[dists$what == "prediction-to-sample", "dist"])
   attr(dists, "W_sample") <- W_sample
+
+  if(!is.null(cvfolds)){
+    cvd <- CAST:::cvdistance(
+      x = sample_sampled,
+      cvfolds = sample_sampled$cvfolds,
+      cvtrain = NULL,
+      type = "feature",
+      variables = variables,
+      normalize = normalize,
+      weight = weights,
+      time_unit = "auto",
+      timevar = NULL,
+      catVars = NULL,
+      algorithm = "brute"
+    )
+
+    dists <- rbind(dists, cvd)
+    W_CV <- twosamples::wass_stat(dists[dists$what == "CV-distances", "dist"],
+                                  dists[dists$what == "prediction-to-sample", "dist"])
+    attr(dists, "W_CV") <- W_CV
+  }
   return(dists)
 }
 
 # Sample to Sample Distance
 
-sample2sample <- function(x, type,variables,weight,time_unit,timevar, catVars, algorithm){
+sample2sample <- function(x, type,variables,normalize,weight,time_unit,timevar, catVars, algorithm){
   if(type == "geo"){
     sf::sf_use_s2(TRUE)
     d <- sf::st_distance(x)
@@ -341,8 +367,10 @@ sample2sample <- function(x, type,variables,weight,time_unit,timevar, catVars, a
       x <- as.data.frame(cbind(x_num, lapply(x_cat, as.factor)))
       x_clean <- x[complete.cases(x),]
     } else {
-      scaleparam <- attributes(scale(x))
-      x <- data.frame(scale(x))
+      if (normalize) {
+        scaleparam <- attributes(scale(x))
+        x <- data.frame(scale(x))
+      }
       x_clean <- data.frame(x[complete.cases(x),])
     }
 
@@ -391,7 +419,7 @@ sample2sample <- function(x, type,variables,weight,time_unit,timevar, catVars, a
 
 
 # Sample to Prediction
-sample2prediction = function(x, modeldomain, type, samplesize,variables,weight,time_unit,timevar, catVars, algorithm){
+sample2prediction = function(x, modeldomain, type, samplesize,variables,normalize,weight,time_unit,timevar, catVars, algorithm){
 
   if(type == "geo"){
     modeldomain <- sf::st_transform(modeldomain, sf::st_crs(x))
@@ -405,6 +433,9 @@ sample2prediction = function(x, modeldomain, type, samplesize,variables,weight,t
   }else if(type == "feature"){
     x <- x[,variables]
     x <- sf::st_drop_geometry(x)
+    if(length(x) > 1 && !normalize) {
+      message("Note: predictor variables are not normalized, so their scales may not be comparable.\nConsider setting normalize=TRUE")
+    }
     modeldomain <- modeldomain[,variables]
     modeldomain <- sf::st_drop_geometry(modeldomain)
 
@@ -425,16 +456,20 @@ sample2prediction = function(x, modeldomain, type, samplesize,variables,weight,t
       modeldomain <- as.data.frame(cbind(modeldomain_num, lapply(modeldomain_cat, as.factor)))
 
     } else {
-      scaleparam <- attributes(scale(x))
-      x <- data.frame(scale(x))
+      if(normalize) {
+        message("Note: predictor variables are normalized to the mean and sd of the training data.\nCheck the distributions of the modeldomain compared to the training data\n")
+
+        scaleparam <- attributes(scale(x))
+        x <- data.frame(scale(x))
+        modeldomain <- data.frame(scale(modeldomain,center=scaleparam$`scaled:center`,
+                                        scale=scaleparam$`scaled:scale`))
+      }
       x_clean <- x[complete.cases(x),]
 
-      modeldomain <- data.frame(scale(modeldomain,center=scaleparam$`scaled:center`,
-                                      scale=scaleparam$`scaled:scale`))
     }
 
     # multiply data with user-supplied variable weights (only for non-categorical case)
-    if(!is.null(weight) && is.null(catVars)){
+    if(!is.null(weight) && is.null(catVars) && normalize){
       x_clean <- sweep(x_clean, 2, unlist(weight), `*`)
       modeldomain <- sweep(modeldomain, 2, unlist(weight), `*`)
     }
@@ -571,7 +606,7 @@ sample2test <- function(x, testdata, type,variables,weight,time_unit,timevar, ca
 
 # between folds
 
-cvdistance <- function(x, cvfolds, cvtrain, type, variables,weight,time_unit,timevar, catVars, algorithm){
+cvdistance <- function(x, cvfolds, cvtrain, type, variables,normalize,weight,time_unit,timevar, catVars, algorithm){
 
   if(!is.null(cvfolds)&!is.list(cvfolds)){ # restructure input if CVtest only contains the fold ID
     tmp <- list()
@@ -604,7 +639,9 @@ cvdistance <- function(x, cvfolds, cvtrain, type, variables,weight,time_unit,tim
     x <- sf::st_drop_geometry(x)
 
     if(is.null(catVars)) {
-      x <- data.frame(scale(x))
+      if(normalize) {
+        x <- data.frame(scale(x))
+      }
     } else {
       x_cat <- x[,catVars,drop=FALSE]
       x_num <- x[,-which(names(x)%in%catVars),drop=FALSE]
@@ -617,15 +654,15 @@ cvdistance <- function(x, cvfolds, cvtrain, type, variables,weight,time_unit,tim
     for(i in 1:length(cvfolds)){
 
       if(!is.null(cvtrain)){
-        testdata_i <- x[cvfolds[[i]],]
-        traindata_i <- x[cvtrain[[i]],]
+        testdata_i <- x[cvfolds[[i]],,drop=FALSE]
+        traindata_i <- x[cvtrain[[i]],,drop=FALSE]
       }else{
-        testdata_i <- x[cvfolds[[i]],]
-        traindata_i <- x[-cvfolds[[i]],]
+        testdata_i <- x[cvfolds[[i]],,drop=FALSE]
+        traindata_i <- x[-cvfolds[[i]],,drop=FALSE]
       }
 
-      testdata_i <- testdata_i[complete.cases(testdata_i),]
-      traindata_i <- traindata_i[complete.cases(traindata_i),]
+      testdata_i <- testdata_i[complete.cases(testdata_i),,drop=FALSE]
+      traindata_i <- traindata_i[complete.cases(traindata_i),,drop=FALSE]
 
       # multiply data with user-supplied variable weights (only for non-categorical case)
       if(!is.null(weight) && is.null(catVars)){
@@ -659,8 +696,6 @@ cvdistance <- function(x, cvfolds, cvtrain, type, variables,weight,time_unit,tim
           }
         }
 
-
-        trainDist[k] <- NA
         d_cv <- c(d_cv,min(trainDist,na.rm=T))
       }
     }
